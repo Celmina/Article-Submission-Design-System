@@ -106,6 +106,10 @@ export default function NewSubmission() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (e: any) => {
+    if (e.target.name === 'keywords') {
+      const parts = e.target.value.split(',');
+      if (parts.length > 10) return;
+    }
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
@@ -131,7 +135,8 @@ export default function NewSubmission() {
       const kwArray = formData.keywords
         .split(',')
         .map(k => k.trim())
-        .filter(k => k);
+        .filter(k => k)
+        .slice(0, 10);
 
       const authors = [
         {
