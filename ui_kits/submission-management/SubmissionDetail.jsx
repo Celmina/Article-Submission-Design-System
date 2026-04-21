@@ -24,19 +24,19 @@ function DetailsTab({ sub }) {
           <div className="field full"><label>Title</label><input className="input" value={sub.title} readOnly /></div>
           <div className="field"><label>Submission Phase</label><input className="input" value={sub.phase} readOnly /></div>
           <div className="field"><label>Submission Status</label><input className="input" value={sub.status} readOnly /></div>
-          <div className="field full"><label>Abstract</label><textarea className="textarea" readOnly defaultValue="This paper introduces a low-latency adaptive bio-signal processing pipeline deployable on edge devices. We demonstrate a 38% reduction in end-to-end inference latency while preserving diagnostic accuracy within 2% of the cloud baseline." /></div>
-          <div className="field full"><label>Keywords</label><input className="input" value="bio-signal · edge · tinyml · latency" readOnly /></div>
+          <div className="field full"><label>Abstract</label><textarea className="textarea" readOnly defaultValue={sub?.raw?.form?.abstract || sub?.raw?.abstract || "This paper introduces a low-latency adaptive bio-signal processing pipeline deployable on edge devices. We demonstrate a 38% reduction in end-to-end inference latency while preserving diagnostic accuracy within 2% of the cloud baseline."} /></div>
+          <div className="field full"><label>Keywords</label><input className="input" value={sub?.raw?.form?.keywords || (sub?.raw?.keywords?.join?.(', ')) || "bio-signal · edge · tinyml · latency"} readOnly /></div>
         </div>
       </div>
 
       <div className="form-section">
         <div className="form-section-title">Author-Correspondent & Co-Authors</div>
         <div className="form-grid">
-          <div className="field"><label>First Name</label><input className="input" value="Evita" readOnly /></div>
-          <div className="field"><label>Last Name</label><input className="input" value="Celmina" readOnly /></div>
-          <div className="field"><label>University</label><input className="input" value="Riga Technical University" readOnly /></div>
-          <div className="field"><label>ORCID</label><input className="input" value="0000-0001-2345-6789" readOnly /></div>
-          <div className="field full"><label>Co-Authors</label><input className="input" value="Andris Ozols · University of Latvia" readOnly /></div>
+          <div className="field"><label>First Name</label><input className="input" value={sub?.raw?.form?.firstName || sub?.raw?.authors?.[0]?.first_name || "Evita"} readOnly /></div>
+          <div className="field"><label>Last Name</label><input className="input" value={sub?.raw?.form?.lastName || sub?.raw?.authors?.[0]?.last_name || "Celmina"} readOnly /></div>
+          <div className="field"><label>University</label><input className="input" value={sub?.raw?.form?.university || sub?.raw?.authors?.[0]?.university || "Riga Technical University"} readOnly /></div>
+          <div className="field"><label>ORCID</label><input className="input" value={sub?.raw?.form?.orcid || sub?.raw?.authors?.[0]?.orcid || "0000-0001-2345-6789"} readOnly /></div>
+          <div className="field full"><label>Co-Authors</label><input className="input" value={sub?.raw?.coAuthors ? sub.raw.coAuthors.map(c => `${c.firstName || c.first_name || ''} ${c.lastName || c.last_name || ''}`).join(', ') : "Andris Ozols · University of Latvia"} readOnly /></div>
         </div>
       </div>
 

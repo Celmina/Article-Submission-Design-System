@@ -18,11 +18,43 @@ function StatusChip({ status, overdue }) {
   return <span className={'chip ' + cls}>{status}</span>;
 }
 
-function SubmissionsList({ onOpen }) {
+function SubmissionsList({ onOpen, onNavigate }) {
   const [scope, setScope] = React.useState('mine');
   const [tab, setTab] = React.useState('active');
   const [state, setState] = React.useState('all');
-  const [rows] = React.useState(MOCK_ROWS);
+  const [rows, setRows] = React.useState(MOCK_ROWS);
+
+  React.useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('submissions') || '[]');
+      if (saved.length > 0) {
+        const formatted = saved.map(s => {
+          let authorText = '-';
+          if (Array.isArray(s.authors)) {
+            authorText = s.authors.map(a => `${a.first_name || a.firstName || ''} ${a.last_name || a.lastName || ''}`.trim()).filter(Boolean).join(', ');
+          } else if (s.form && s.form.firstName) {
+            authorText = `${s.form.firstName} ${s.form.lastName}`;
+          }
+
+          return {
+            id: s.id,
+            title: s.title || (s.form && s.form.articleTitle) || '-',
+            authors: authorText,
+            journal: s.journal_title || (s.form && s.form.journal) || '-',
+            phase: s.phase || 'Initial Review',
+            status: s.status || 'In progress',
+            overdue: false,
+            submitted: s.created_at || s.submittedAt ? new Date(s.created_at || s.submittedAt).toISOString().split('T')[0] : '-',
+            last: s.created_at || s.submittedAt ? new Date(s.created_at || s.submittedAt).toISOString().split('T')[0] : '-',
+            raw: s
+          };
+        });
+        setRows([...formatted, ...MOCK_ROWS]);
+      }
+    } catch (err) {
+      console.error('Failed to load local submissions:', err);
+    }
+  }, []);
 
   const filtered = rows.filter(r => {
     if (tab === 'archived') return r.status === 'Rejected' || r.status === 'Publication Process';
@@ -33,9 +65,16 @@ function SubmissionsList({ onOpen }) {
   const overdueCount = rows.filter(r => r.overdue).length;
   const newCount     = rows.filter(r => r.phase === 'Initial Review').length;
 
+  const totals = {
+    total: rows.length,
+    pending: rows.filter(r => r.status === 'In progress').length,
+    revision: rows.filter(r => r.status.includes('revision')).length,
+    done: rows.filter(r => r.status === 'Publication Process').length
+  };
+
   return (
     <div className="stack">
-      <StatCards totals={{ total: rows.length, pending: 12, revision: 3, done: 8 }} />
+      <StatCards totals={totals} />
 
       <div className="card">
         <div className="card-head">
@@ -44,7 +83,7 @@ function SubmissionsList({ onOpen }) {
               <h5>Authors Submissions Table</h5>
               <div className="sub">Manage active and archived submissions across your journals</div>
             </div>
-            <button className="btn primary"><i className="material-icons">add</i>New Submission</button>
+            <button className="btn primary" onClick={() => onNavigate && onNavigate('new')}><i className="material-icons">add</i>New Submission</button>
           </div>
         </div>
 

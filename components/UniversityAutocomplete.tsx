@@ -1,76 +1,98 @@
-import React, { useState, useEffect } from 'react';
-import { Autocomplete, TextField, CircularProgress } from '@mui/material';
+import { useEffect, useState } from 'react';
+import { Autocomplete, CircularProgress, TextField } from '@mui/material';
 
-interface UniversityAutocompleteProps {
+type UniversityAutocompleteProps = {
   value: string;
   onChange: (val: string) => void;
   label?: string;
   required?: boolean;
-}
+  selectedCountry?: string;
+  error?: boolean;
+  helperText?: string;
+};
 
-export default function UniversityAutocomplete({ value, onChange, label = "University", required = false }: UniversityAutocompleteProps) {
-  const [open, setOpen] = useState(false);
+type UniversityApiItem = {
+  name?: string;
+};
+
+export default function UniversityAutocomplete({
+  value,
+  onChange,
+  label = 'University',
+  required = false,
+  selectedCountry = '',
+  error = false,
+  helperText = ' ',
+}: UniversityAutocompleteProps) {
   const [options, setOptions] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    let active = true;
+    const query = value.trim();
 
-    if (inputValue.length < 3) {
-      setOptions(value ? [value] : []);
-      return undefined;
+    if (query.length < 2) {
+      setOptions([]);
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const params = new URLSearchParams({ name: query });
+
+    if (selectedCountry.trim()) {
+      params.append('country', selectedCountry.trim());
     }
 
     setLoading(true);
-    // Connect to global hipolabs university search public API
-    fetch(`http://universities.hipolabs.com/search?name=${encodeURIComponent(inputValue)}`)
+
+    fetch(`https://universities.hipolabs.com/search?${params.toString()}`, {
+      signal: controller.signal,
+    })
       .then((res) => res.json())
-      .then((data) => {
-        if (active) {
-          const names = data.map((item: any) => item.name);
-          const uniqueNames = Array.from(new Set<string>(names)).slice(0, 50); // limit to 50
-          setOptions(uniqueNames);
-          setLoading(false);
+      .then((data: UniversityApiItem[]) => {
+        const names = Array.isArray(data)
+          ? data.map((item) => item.name || '').filter(Boolean)
+          : [];
+
+        setOptions([...new Set(names)].slice(0, 50));
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+          console.error('University fetch error:', err);
         }
       })
-      .catch(() => {
-        if (active) setLoading(false);
+      .finally(() => {
+        setLoading(false);
       });
 
-    return () => {
-      active = false;
-    };
-  }, [inputValue, value]);
+    return () => controller.abort();
+  }, [value, selectedCountry]);
 
   return (
     <Autocomplete
       freeSolo
-      open={open}
-      onOpen={() => setOpen(true)}
-      onClose={() => setOpen(false)}
-      inputValue={inputValue}
-      onInputChange={(_, newInputValue) => {
-        setInputValue(newInputValue);
-        onChange(newInputValue);
-      }}
-      value={value}
-      onChange={(_, newValue) => onChange(newValue || '')}
       options={options}
+      inputValue={value}
+      onInputChange={(_, newInputValue) => onChange(newInputValue)}
+      onChange={(_, newValue) => onChange(typeof newValue === 'string' ? newValue : '')}
       loading={loading}
+      noOptionsText={value.trim().length < 2 ? 'Type at least 2 letters' : 'No universities found'}
       renderInput={(params) => (
         <TextField
           {...params}
+          fullWidth
+          size="small"
           label={label}
           required={required}
-          size="small"
+          error={error}
+          helperText={helperText}
           InputProps={{
             ...params.InputProps,
             endAdornment: (
-              <React.Fragment>
-                {loading ? <CircularProgress color="inherit" size={20} /> : null}
+              <>
+                {loading ? <CircularProgress color="inherit" size={18} /> : null}
                 {params.InputProps.endAdornment}
-              </React.Fragment>
+              </>
             ),
           }}
         />

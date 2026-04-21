@@ -1,6 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Typography, Card, TextField, Button, Box, Grid, Divider, Autocomplete } from '@mui/material';
+import {
+  Alert,
+  Autocomplete,
+  Box,
+  Button,
+  Card,
+  Checkbox,
+  Chip,
+  Divider,
+  FormControlLabel,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import { COUNTRIES } from '../utils/countries';
@@ -22,7 +35,7 @@ const JOURNALS = [
   'IEEE Transactions on Neural Networks and Learning Systems (ISSN: 2162-237X)',
   'IEEE Transactions on Knowledge and Data Engineering (ISSN: 1041-4347)',
   'ACM Computing Surveys (ISSN: 0360-0300)',
-  'ACM Transactions on Interactive Intelligent Systems (ISSN: 2160-6455)'
+  'ACM Transactions on Interactive Intelligent Systems (ISSN: 2160-6455)',
 ];
 
 const DEGREE_POSITIONS = [
@@ -35,7 +48,7 @@ const DEGREE_POSITIONS = [
   'Senior Researcher',
   'PhD Student',
   'Doctoral Candidate',
-  'Postdoctoral Researcher'
+  'Postdoctoral Researcher',
 ];
 
 const FACULTIES = [
@@ -44,7 +57,7 @@ const FACULTIES = [
   'Faculty of Information Technology',
   'Faculty of Mathematics',
   'Faculty of Natural Sciences',
-  'Faculty of Business and Economics'
+  'Faculty of Business and Economics',
 ];
 
 const DEPARTMENTS = [
@@ -53,10 +66,78 @@ const DEPARTMENTS = [
   'Department of Computer Science',
   'Department of Software Engineering',
   'Department of Data Science',
-  'Department of Cybersecurity'
+  'Department of Cybersecurity',
 ];
 
-const EMPTY_COAUTHOR = {
+type FormDataState = {
+  journal_title: string;
+  title: string;
+  abstract: string;
+  keywords: string;
+  comments: string;
+
+  first_name: string;
+  last_name: string;
+  email: string;
+  webpage: string;
+  researcher_id: string;
+  orcid: string;
+
+  degree_position: string;
+  faculty: string;
+  department: string;
+  university: string;
+  country: string;
+  city: string;
+
+  consent_original: boolean;
+  consent_authors: boolean;
+  consent_privacy: boolean;
+};
+
+type CoAuthor = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  orcid: string;
+  researcher_id: string;
+  degree_position: string;
+  faculty: string;
+  department: string;
+  university: string;
+  country: string;
+  city: string;
+};
+
+type Errors = Partial<Record<string, string>>;
+
+const EMPTY_FORM: FormDataState = {
+  journal_title: '',
+  title: '',
+  abstract: '',
+  keywords: '',
+  comments: '',
+
+  first_name: '',
+  last_name: '',
+  email: '',
+  webpage: '',
+  researcher_id: '',
+  orcid: '',
+
+  degree_position: '',
+  faculty: '',
+  department: '',
+  university: '',
+  country: '',
+  city: '',
+
+  consent_original: false,
+  consent_authors: false,
+  consent_privacy: false,
+};
+
+const EMPTY_COAUTHOR: CoAuthor = {
   first_name: '',
   last_name: '',
   email: '',
@@ -65,77 +146,249 @@ const EMPTY_COAUTHOR = {
   degree_position: '',
   faculty: '',
   department: '',
-  university: ''
+  university: '',
+  country: '',
+  city: '',
 };
+
+const DRAFT_STORAGE_KEY = 'newSubmissionDraft';
+
+function generateId() {
+  return String(Date.now());
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function SuggestionField({
+  label,
+  value,
+  onChange,
+  options,
+  required = false,
+  error = false,
+  helperText = ' ',
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  required?: boolean;
+  error?: boolean;
+  helperText?: string;
+}) {
+  return (
+    <Autocomplete
+      freeSolo
+      options={options}
+      inputValue={value}
+      onInputChange={(_, newInputValue) => onChange(newInputValue)}
+      onChange={(_, newValue) => onChange(typeof newValue === 'string' ? newValue : '')}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          fullWidth
+          size="small"
+          label={label}
+          required={required}
+          error={error}
+          helperText={helperText}
+        />
+      )}
+    />
+  );
+}
 
 export default function NewSubmission() {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    // Journal
-    journal_title: '',
-    // Article
-    title: '',
-    abstract: '',
-    keywords: '',
-    comments: '',
 
-    // Primary Author
-    first_name: '',
-    last_name: '',
-    email: '',
-    webpage: '',
-    researcher_id: '',
-    orcid: '',
-
-    // Affiliation
-    degree_position: '',
-    faculty: '',
-    department: '',
-    university: '',
-    country: '',
-    city: '',
-  });
-
-
-
+  const [formData, setFormData] = useState<FormDataState>(EMPTY_FORM);
+  const [coAuthors, setCoAuthors] = useState<CoAuthor[]>([]);
   const [articleFile, setArticleFile] = useState<File | null>(null);
   const [coverLetterFile, setCoverLetterFile] = useState<File | null>(null);
-
-  const [coAuthors, setCoAuthors] = useState<any[]>([]);
-
+  const [supplementaryFiles, setSupplementaryFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Errors>({});
+  const [banner, setBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  const handleChange = (e: any) => {
-    if (e.target.name === 'keywords') {
-      const parts = e.target.value.split(',');
-      if (parts.length > 10) return;
+  useEffect(() => {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.formData) {
+        setFormData({ ...EMPTY_FORM, ...parsed.formData });
+      }
+      if (Array.isArray(parsed?.coAuthors)) {
+        setCoAuthors(parsed.coAuthors);
+      }
+      setBanner({
+        type: 'info',
+        text: 'Draft restored. Files need to be uploaded again.',
+      });
+    } catch {
+      // ignore bad draft
     }
-    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  }, []);
+
+  const keywordCount = useMemo(() => {
+    return formData.keywords
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean).length;
+  }, [formData.keywords]);
+
+  const abstractLength = formData.abstract.length;
+
+  const updateField = <K extends keyof FormDataState>(key: K, value: FormDataState[K]) => {
+    setFormData((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'country') {
+        next.city = '';
+      }
+      return next;
+    });
+
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[key as string];
+      if (key === 'country') delete next.city;
+      return next;
+    });
   };
 
-  const handleCoAuthorChange = (index: number, field: string, value: string) => {
-    const updated = [...coAuthors];
-    updated[index] = { ...updated[index], [field]: value };
-    setCoAuthors(updated);
+  const updateCoAuthor = (index: number, field: keyof CoAuthor, value: string) => {
+    setCoAuthors((prev) =>
+      prev.map((author, i) =>
+        i === index
+          ? {
+            ...author,
+            [field]: value,
+            ...(field === 'country' ? { city: '' } : {}),
+          }
+          : author
+      )
+    );
   };
 
-  const addCoAuthor = () => setCoAuthors([...coAuthors, { ...EMPTY_COAUTHOR }]);
+  const addCoAuthor = () => {
+    setCoAuthors((prev) => [...prev, { ...EMPTY_COAUTHOR }]);
+  };
+
   const removeCoAuthor = (index: number) => {
-    setCoAuthors(coAuthors.filter((_, i) => i !== index));
+    setCoAuthors((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async (e: any) => {
-    e.preventDefault();
-    if (!articleFile) return alert('Please attach the Article manuscript.');
-    if (!coverLetterFile) return alert('Please attach the Cover Letter.');
+  const handleSupplementaryFiles = (files: FileList | null) => {
+    const selected = Array.from(files || []);
+    if (!selected.length) return;
+
+    setSupplementaryFiles((prev) => {
+      const merged = [...prev];
+      selected.forEach((file) => {
+        const exists = merged.some(
+          (existing) =>
+            existing.name === file.name &&
+            existing.size === file.size &&
+            existing.lastModified === file.lastModified
+        );
+        if (!exists) merged.push(file);
+      });
+      return merged;
+    });
+  };
+
+  const removeSupplementaryFile = (index: number) => {
+    setSupplementaryFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const validate = () => {
+    const nextErrors: Errors = {};
+
+    if (!formData.journal_title.trim()) nextErrors.journal_title = 'Journal is required.';
+    if (!formData.title.trim()) nextErrors.title = 'Article title is required.';
+    if (!formData.abstract.trim()) nextErrors.abstract = 'Abstract is required.';
+    if (!formData.keywords.trim()) nextErrors.keywords = 'Keywords are required.';
+
+    if (!formData.first_name.trim()) nextErrors.first_name = 'First name is required.';
+    if (!formData.last_name.trim()) nextErrors.last_name = 'Last name is required.';
+    if (!formData.email.trim()) nextErrors.email = 'Email is required.';
+    else if (!isValidEmail(formData.email)) nextErrors.email = 'Enter a valid email address.';
+
+    if (!formData.degree_position.trim()) nextErrors.degree_position = 'Degree and position is required.';
+    if (!formData.faculty.trim()) nextErrors.faculty = 'Faculty is required.';
+    if (!formData.department.trim()) nextErrors.department = 'Department is required.';
+    if (!formData.university.trim()) nextErrors.university = 'University is required.';
+    if (!formData.country.trim()) nextErrors.country = 'Country is required.';
+    if (!formData.city.trim()) nextErrors.city = 'City is required.';
+
+    if (!articleFile) nextErrors.article_file = 'Article manuscript is required.';
+    if (!coverLetterFile) nextErrors.cover_letter_file = 'Cover letter is required.';
+
+    if (!formData.consent_original) nextErrors.consent_original = 'This confirmation is required.';
+    if (!formData.consent_authors) nextErrors.consent_authors = 'This confirmation is required.';
+    if (!formData.consent_privacy) nextErrors.consent_privacy = 'You must agree to the privacy terms.';
+
+    coAuthors.forEach((author, index) => {
+      if (!author.first_name.trim()) nextErrors[`co_${index}_first_name`] = 'Required';
+      if (!author.last_name.trim()) nextErrors[`co_${index}_last_name`] = 'Required';
+      if (!author.email.trim()) nextErrors[`co_${index}_email`] = 'Required';
+      else if (!isValidEmail(author.email)) nextErrors[`co_${index}_email`] = 'Invalid email';
+      if (!author.university.trim()) nextErrors[`co_${index}_university`] = 'Required';
+    });
+
+    return nextErrors;
+  };
+
+  const handleSaveDraft = () => {
+    localStorage.setItem(
+      DRAFT_STORAGE_KEY,
+      JSON.stringify({
+        formData,
+        coAuthors,
+      })
+    );
+
+    setBanner({
+      type: 'success',
+      text: 'Draft saved locally.',
+    });
+  };
+
+  const handleCancel = () => {
+    setFormData(EMPTY_FORM);
+    setCoAuthors([]);
+    setArticleFile(null);
+    setCoverLetterFile(null);
+    setSupplementaryFiles([]);
+    setErrors({});
+    setBanner(null);
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    const nextErrors = validate();
+    setErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setBanner({
+        type: 'error',
+        text: 'Please fix the highlighted fields before submitting.',
+      });
+      return;
+    }
 
     setIsSubmitting(true);
 
     try {
-      const kwArray = formData.keywords
+      const keywords = formData.keywords
         .split(',')
-        .map(k => k.trim())
-        .filter(k => k)
+        .map((item) => item.trim())
+        .filter(Boolean)
         .slice(0, 10);
 
       const authors = [
@@ -153,392 +406,588 @@ export default function NewSubmission() {
           country: formData.country,
           city: formData.city,
           is_primary: true,
-          author_order: 1
+          author_order: 1,
         },
-        ...coAuthors
-          .filter(c => c.first_name || c.last_name || c.email)
-          .map((c, idx) => ({
-            first_name: c.first_name,
-            last_name: c.last_name,
-            email: c.email,
-            orcid: c.orcid,
-            researcher_id: c.researcher_id,
-            degree_position: c.degree_position,
-            faculty: c.faculty,
-            department: c.department,
-            university: c.university,
-            is_primary: false,
-            author_order: idx + 2
-          }))
+        ...coAuthors.map((author, index) => ({
+          first_name: author.first_name,
+          last_name: author.last_name,
+          email: author.email,
+          researcher_id: author.researcher_id,
+          orcid: author.orcid,
+          degree_position: author.degree_position,
+          faculty: author.faculty,
+          department: author.department,
+          university: author.university,
+          country: author.country,
+          city: author.city,
+          is_primary: false,
+          author_order: index + 2,
+        })),
       ];
 
       const newSubmission = {
-        id: Date.now(),
+        id: generateId(),
+        status: 'Submitted',
+        phase: 'Initial Review',
         journal_title: formData.journal_title,
         title: formData.title,
         abstract: formData.abstract,
         comments: formData.comments,
-        keywords: kwArray,
+        keywords,
         authors,
         article_file_name: articleFile?.name || '',
         cover_letter_file_name: coverLetterFile?.name || '',
-        created_at: new Date().toISOString()
+        supplementary_files: supplementaryFiles.map((file) => file.name),
+        created_at: new Date().toISOString(),
       };
 
       const existingSubmissions = JSON.parse(localStorage.getItem('submissions') || '[]');
       existingSubmissions.push(newSubmission);
       localStorage.setItem('submissions', JSON.stringify(existingSubmissions));
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
 
       navigate(`/success/${newSubmission.id}`);
-    } catch (err) {
-      console.error('SUBMISSION ERROR:', err);
-      alert('Failed to save submission locally.');
+    } catch (error) {
+      console.error('SUBMISSION ERROR:', error);
+      setBanner({
+        type: 'error',
+        text: 'Failed to save submission locally.',
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const fieldGrid = {
+    display: 'grid',
+    gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+    gap: 2,
+  };
+
   return (
     <Box sx={{ pb: 6, pt: 2, maxWidth: 1000, mx: 'auto' }}>
       <form onSubmit={handleSubmit}>
-
-        {/* ── Page Title ── */}
-        <Typography variant="h4" fontWeight="700" textAlign="center" sx={{ mb: 0.5 }}>
+        <Typography variant="h4" fontWeight={700} textAlign="center" sx={{ mb: 0.5 }}>
           New Article Submission
         </Typography>
 
-        <Card sx={{ p: { xs: 2, md: 2 }, mt: 2 }}>
+        <Card sx={{ p: { xs: 2, md: 3 }, mt: 2 }}>
+          {banner && (
+            <Alert severity={banner.type} sx={{ mb: 3 }}>
+              {banner.text}
+            </Alert>
+          )}
 
-          {/* ════════════════════════════════════════════════
-               SECTION 1 — Journal Selection
-             ════════════════════════════════════════════════ */}
-          <Typography variant="h6" fontWeight="700" textAlign="center" sx={{ mb: 2 }}>
+          <Typography variant="h6" fontWeight={700} textAlign="center" sx={{ mb: 2 }}>
             Journal Selection
           </Typography>
 
-          <Autocomplete
-            options={JOURNALS}
+          <SuggestionField
+            label="Journal Title"
             value={formData.journal_title}
-            onChange={(_, newVal) => setFormData(prev => ({ ...prev, journal_title: newVal || '' }))}
-            renderInput={(params) => <TextField {...params} label="Journal Title" required />}
-            sx={{ mb: 1 }}
+            onChange={(value) => updateField('journal_title', value)}
+            options={JOURNALS}
+            required
+            error={Boolean(errors.journal_title)}
+            helperText={errors.journal_title || 'Search active journals'}
           />
-          <Typography variant="caption" color="textSecondary" sx={{ mb: 0 }}>
-            Search active journals
-          </Typography>
 
           <Divider sx={{ my: 4 }} />
 
-          {/* ════════════════════════════════════════════════
-               SECTION 2 — Author – Correspondent Personal Information
-             ════════════════════════════════════════════════ */}
-          <Typography variant="h6" fontWeight="700" textAlign="center" sx={{ mb: 3 }}>
+          <Typography variant="h6" fontWeight={700} textAlign="center" sx={{ mb: 3 }}>
             Author – Correspondent Personal Information
           </Typography>
 
-          {/* Contact Information Block */}
           <Typography variant="subtitle2" color="primary" textAlign="center" sx={{ mb: 2 }}>
-            Contact Information Block
+            Contact Information
           </Typography>
-          <Grid container spacing={3} sx={{ mb: 3 }}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField fullWidth label="First Name" name="first_name" value={formData.first_name} onChange={handleChange} required />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField fullWidth label="Last Name" name="last_name" value={formData.last_name} onChange={handleChange} required />
-            </Grid>
-          </Grid>
 
-          {/* Professional Occupation Block */}
-          <Typography variant="subtitle2" color="primary" textAlign="center" sx={{ mb: 2 }}>
-            Professional Occupation Block
+          <Box sx={fieldGrid}>
+            <TextField
+              fullWidth
+              size="small"
+              label="First Name"
+              value={formData.first_name}
+              onChange={(e) => updateField('first_name', e.target.value)}
+              required
+              error={Boolean(errors.first_name)}
+              helperText={errors.first_name || ' '}
+            />
+
+            <TextField
+              fullWidth
+              size="small"
+              label="Last Name"
+              value={formData.last_name}
+              onChange={(e) => updateField('last_name', e.target.value)}
+              required
+              error={Boolean(errors.last_name)}
+              helperText={errors.last_name || ' '}
+            />
+          </Box>
+
+          <Typography variant="subtitle2" color="primary" textAlign="center" sx={{ mt: 3, mb: 2 }}>
+            Professional Occupation
           </Typography>
-          <Grid container spacing={3} sx={{ mb: 3 }}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <Autocomplete
-                freeSolo
-                options={DEGREE_POSITIONS}
-                value={formData.degree_position}
-                onChange={(_, newVal) =>
-                  setFormData(prev => ({ ...prev, degree_position: newVal || '' }))
-                }
-                inputValue={formData.degree_position}
-                onInputChange={(_, newInputValue) =>
-                  setFormData(prev => ({ ...prev, degree_position: newInputValue }))
-                }
-                renderInput={(params) => (
-                  <TextField {...params} label="Degree and Position" required />
-                )}
-              />
-            </Grid>
 
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <Autocomplete
-                freeSolo
-                options={FACULTIES}
-                value={formData.faculty}
-                onChange={(_, newVal) =>
-                  setFormData(prev => ({ ...prev, faculty: newVal || '' }))
-                }
-                inputValue={formData.faculty}
-                onInputChange={(_, newInputValue) =>
-                  setFormData(prev => ({ ...prev, faculty: newInputValue }))
-                }
-                renderInput={(params) => (
-                  <TextField {...params} label="Faculty" required />
-                )}
-              />
-            </Grid>
+          <Box sx={fieldGrid}>
+            <SuggestionField
+              label="Degree and Position"
+              value={formData.degree_position}
+              onChange={(value) => updateField('degree_position', value)}
+              options={DEGREE_POSITIONS}
+              required
+              error={Boolean(errors.degree_position)}
+              helperText={errors.degree_position || ' '}
+            />
 
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <Autocomplete
-                freeSolo
-                options={DEPARTMENTS}
-                value={formData.department}
-                onChange={(_, newVal) =>
-                  setFormData(prev => ({ ...prev, department: newVal || '' }))
-                }
-                inputValue={formData.department}
-                onInputChange={(_, newInputValue) =>
-                  setFormData(prev => ({ ...prev, department: newInputValue }))
-                }
-                renderInput={(params) => (
-                  <TextField {...params} label="Department" required />
-                )}
-              />
-            </Grid>
+            <SuggestionField
+              label="Faculty"
+              value={formData.faculty}
+              onChange={(value) => updateField('faculty', value)}
+              options={FACULTIES}
+              required
+              error={Boolean(errors.faculty)}
+              helperText={errors.faculty || ' '}
+            />
 
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <UniversityAutocomplete
-                value={formData.university}
-                onChange={(val) => setFormData(prev => ({ ...prev, university: val }))}
-                required
-              />
-            </Grid>
-          </Grid>
+            <SuggestionField
+              label="Department"
+              value={formData.department}
+              onChange={(value) => updateField('department', value)}
+              options={DEPARTMENTS}
+              required
+              error={Boolean(errors.department)}
+              helperText={errors.department || ' '}
+            />
 
-          {/* Business Address Block */}
-          <Typography variant="subtitle2" color="primary" textAlign="center" sx={{ mb: 2 }}>
-            Business Address Block
+            <UniversityAutocomplete
+              value={formData.university}
+              onChange={(value) => updateField('university', value)}
+              selectedCountry={formData.country}
+              required
+              error={Boolean(errors.university)}
+              helperText={errors.university || ' '}
+            />
+          </Box>
+
+          <Typography variant="subtitle2" color="primary" textAlign="center" sx={{ mt: 3, mb: 2 }}>
+            Business Address
           </Typography>
-          <Grid container spacing={3} sx={{ mb: 3 }}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <Autocomplete
-                options={COUNTRIES}
-                value={formData.country}
-                onChange={(_, newVal) => setFormData(prev => ({ ...prev, country: newVal || '', city: '' }))}
-                renderInput={(params) => <TextField {...params} label="Country" required />}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <CityAutocomplete
-                selectedCountry={formData.country}
-                value={formData.city}
-                onChange={(val) => setFormData(prev => ({ ...prev, city: val }))}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField fullWidth label="Email" type="email" name="email" value={formData.email} onChange={handleChange} required />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField fullWidth label="Personal Webpage URL" name="webpage" value={formData.webpage} onChange={handleChange} />
-            </Grid>
-          </Grid>
 
-          {/* ID's Block */}
-          <Typography variant="subtitle2" color="primary" textAlign="center" sx={{ mb: 2 }}>
-            ID's Block
+          <Box sx={fieldGrid}>
+            <Autocomplete
+              freeSolo
+              options={COUNTRIES}
+              inputValue={formData.country}
+              onInputChange={(_, newInputValue) => updateField('country', newInputValue)}
+              onChange={(_, newValue) => updateField('country', typeof newValue === 'string' ? newValue : '')}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  fullWidth
+                  size="small"
+                  label="Country"
+                  required
+                  error={Boolean(errors.country)}
+                  helperText={errors.country || ' '}
+                />
+              )}
+            />
+
+            <CityAutocomplete
+              selectedCountry={formData.country}
+              value={formData.city}
+              onChange={(value) => updateField('city', value)}
+              required
+              error={Boolean(errors.city)}
+              helperText={errors.city || ' '}
+            />
+
+            <TextField
+              fullWidth
+              size="small"
+              label="Email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => updateField('email', e.target.value)}
+              required
+              error={Boolean(errors.email)}
+              helperText={errors.email || ' '}
+            />
+
+            <TextField
+              fullWidth
+              size="small"
+              label="Personal Webpage URL"
+              value={formData.webpage}
+              onChange={(e) => updateField('webpage', e.target.value)}
+              helperText=" "
+            />
+          </Box>
+
+          <Typography variant="subtitle2" color="primary" textAlign="center" sx={{ mt: 3, mb: 2 }}>
+            IDs
           </Typography>
-          <Grid container spacing={3} sx={{ mb: 1 }}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField fullWidth label="Researcher ID" name="researcher_id" value={formData.researcher_id} onChange={handleChange} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField fullWidth label="ORCID iD" name="orcid" value={formData.orcid} onChange={handleChange} />
-            </Grid>
-          </Grid>
+
+          <Box sx={fieldGrid}>
+            <TextField
+              fullWidth
+              size="small"
+              label="Researcher ID"
+              value={formData.researcher_id}
+              onChange={(e) => updateField('researcher_id', e.target.value)}
+              helperText=" "
+            />
+
+            <TextField
+              fullWidth
+              size="small"
+              label="ORCID iD"
+              value={formData.orcid}
+              onChange={(e) => updateField('orcid', e.target.value)}
+              helperText=" "
+            />
+          </Box>
 
           <Divider sx={{ my: 4 }} />
 
-          {/* ════════════════════════════════════════════════
-               SECTION 3 — Co-Authors
-             ════════════════════════════════════════════════ */}
           <Box sx={{ mb: 3 }}>
-            <Typography variant="h6" fontWeight="700" sx={{ mb: 2 }}>
+            <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
               Co-Authors
             </Typography>
 
-            {coAuthors.length === 0 && (
-              <Button startIcon={<AddIcon />} variant="outlined" size="small" onClick={addCoAuthor}>
-                Add Co-author
-              </Button>
-            )}
+            <Button startIcon={<AddIcon />} variant="outlined" size="small" onClick={addCoAuthor} type="button">
+              Add Co-author
+            </Button>
           </Box>
 
           {coAuthors.map((author, index) => (
-            <Box key={index} sx={{ mb: 3, p: 3, border: '1px solid rgba(0,0,0,0.12)', borderRadius: '12px', backgroundColor: '#fafafa' }}>
+            <Box
+              key={index}
+              sx={{
+                mb: 3,
+                p: 3,
+                border: '1px solid rgba(0,0,0,0.12)',
+                borderRadius: 2,
+                backgroundColor: '#fafafa',
+              }}
+            >
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="subtitle2" sx={{ mb: 0 }}>
-                  Collaborator #{index + 1}
-                </Typography>
+                <Typography variant="subtitle2">Collaborator #{index + 1}</Typography>
                 <Button
                   size="small"
                   color="error"
                   startIcon={<DeleteIcon />}
                   onClick={() => removeCoAuthor(index)}
+                  type="button"
                 >
-                  Remove Co-author
+                  Remove
                 </Button>
               </Box>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField fullWidth size="small" label="First Name" value={author.first_name} onChange={(e) => handleCoAuthorChange(index, 'first_name', e.target.value)} />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField fullWidth size="small" label="Last Name" value={author.last_name} onChange={(e) => handleCoAuthorChange(index, 'last_name', e.target.value)} />
-                </Grid>
-                <Grid size={{ xs: 12 }}>
-                  <TextField fullWidth size="small" label="Email" type="email" value={author.email} onChange={(e) => handleCoAuthorChange(index, 'email', e.target.value)} />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField fullWidth size="small" label="ORCID" value={author.orcid} onChange={(e) => handleCoAuthorChange(index, 'orcid', e.target.value)} />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField fullWidth size="small" label="Researcher ID" value={author.researcher_id} onChange={(e) => handleCoAuthorChange(index, 'researcher_id', e.target.value)} />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Autocomplete
-                    freeSolo
-                    options={DEGREE_POSITIONS}
-                    value={author.degree_position}
-                    onChange={(_, newVal) =>
-                      handleCoAuthorChange(index, 'degree_position', newVal || '')
-                    }
-                    inputValue={author.degree_position}
-                    onInputChange={(_, newInputValue) =>
-                      handleCoAuthorChange(index, 'degree_position', newInputValue)
-                    }
-                    renderInput={(params) => (
-                      <TextField {...params} label="Degree and Position" />
-                    )}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Autocomplete
-                    freeSolo
-                    options={FACULTIES}
-                    value={author.faculty}
-                    onChange={(_, newVal) =>
-                      handleCoAuthorChange(index, 'faculty', newVal || '')
-                    }
-                    inputValue={author.faculty}
-                    onInputChange={(_, newInputValue) =>
-                      handleCoAuthorChange(index, 'faculty', newInputValue)
-                    }
-                    renderInput={(params) => (
-                      <TextField {...params} label="Faculty" />
-                    )}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Autocomplete
-                    freeSolo
-                    options={DEPARTMENTS}
-                    value={author.department}
-                    onChange={(_, newVal) =>
-                      handleCoAuthorChange(index, 'department', newVal || '')
-                    }
-                    inputValue={author.department}
-                    onInputChange={(_, newInputValue) =>
-                      handleCoAuthorChange(index, 'department', newInputValue)
-                    }
-                    renderInput={(params) => (
-                      <TextField {...params} label="Department" />
-                    )}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12 }}>
-                  <UniversityAutocomplete
-                    value={author.university}
-                    onChange={(val) => handleCoAuthorChange(index, 'university', val)}
-                    required
-                  />
-                </Grid>
-              </Grid>
+
+              <Box sx={fieldGrid}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="First Name"
+                  value={author.first_name}
+                  onChange={(e) => updateCoAuthor(index, 'first_name', e.target.value)}
+                  error={Boolean(errors[`co_${index}_first_name`])}
+                  helperText={errors[`co_${index}_first_name`] || ' '}
+                />
+
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Last Name"
+                  value={author.last_name}
+                  onChange={(e) => updateCoAuthor(index, 'last_name', e.target.value)}
+                  error={Boolean(errors[`co_${index}_last_name`])}
+                  helperText={errors[`co_${index}_last_name`] || ' '}
+                />
+
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Email"
+                  type="email"
+                  value={author.email}
+                  onChange={(e) => updateCoAuthor(index, 'email', e.target.value)}
+                  error={Boolean(errors[`co_${index}_email`])}
+                  helperText={errors[`co_${index}_email`] || ' '}
+                />
+
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="ORCID"
+                  value={author.orcid}
+                  onChange={(e) => updateCoAuthor(index, 'orcid', e.target.value)}
+                  helperText=" "
+                />
+
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Researcher ID"
+                  value={author.researcher_id}
+                  onChange={(e) => updateCoAuthor(index, 'researcher_id', e.target.value)}
+                  helperText=" "
+                />
+
+                <SuggestionField
+                  label="Degree and Position"
+                  value={author.degree_position}
+                  onChange={(value) => updateCoAuthor(index, 'degree_position', value)}
+                  options={DEGREE_POSITIONS}
+                  helperText=" "
+                />
+
+                <SuggestionField
+                  label="Faculty"
+                  value={author.faculty}
+                  onChange={(value) => updateCoAuthor(index, 'faculty', value)}
+                  options={FACULTIES}
+                  helperText=" "
+                />
+
+                <SuggestionField
+                  label="Department"
+                  value={author.department}
+                  onChange={(value) => updateCoAuthor(index, 'department', value)}
+                  options={DEPARTMENTS}
+                  helperText=" "
+                />
+
+                <UniversityAutocomplete
+                  value={author.university}
+                  onChange={(value) => updateCoAuthor(index, 'university', value)}
+                  selectedCountry={author.country}
+                  error={Boolean(errors[`co_${index}_university`])}
+                  helperText={errors[`co_${index}_university`] || ' '}
+                />
+
+                <Autocomplete
+                  freeSolo
+                  options={COUNTRIES}
+                  inputValue={author.country}
+                  onInputChange={(_, newInputValue) => updateCoAuthor(index, 'country', newInputValue)}
+                  onChange={(_, newValue) =>
+                    updateCoAuthor(index, 'country', typeof newValue === 'string' ? newValue : '')
+                  }
+                  renderInput={(params) => (
+                    <TextField {...params} fullWidth size="small" label="Country" helperText=" " />
+                  )}
+                />
+
+                <CityAutocomplete
+                  selectedCountry={author.country}
+                  value={author.city}
+                  onChange={(value) => updateCoAuthor(index, 'city', value)}
+                  helperText=" "
+                />
+              </Box>
             </Box>
           ))}
-          {coAuthors.length > 0 && (
-            <Box sx={{ mb: 3 }}>
-              <Button startIcon={<AddIcon />} variant="outlined" size="small" onClick={addCoAuthor}>
-                Add Co-author
-              </Button>
-            </Box>
-          )}
+
           <Divider sx={{ my: 4 }} />
 
-          {/* ════════════════════════════════════════════════
-               SECTION 4 — Article Details
-             ════════════════════════════════════════════════ */}
-          <Typography variant="h6" fontWeight="700" textAlign="center" sx={{ mb: 3 }}>
+          <Typography variant="h6" fontWeight={700} textAlign="center" sx={{ mb: 3 }}>
             Article Details
           </Typography>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <TextField fullWidth label="Article Title" name="title" value={formData.title} onChange={handleChange} required />
+            <TextField
+              fullWidth
+              size="small"
+              label="Article Title"
+              value={formData.title}
+              onChange={(e) => updateField('title', e.target.value)}
+              required
+              error={Boolean(errors.title)}
+              helperText={errors.title || ' '}
+            />
 
-            <Box>
-              <TextField fullWidth label="Article Abstract (Max 2000 chars)" name="abstract" value={formData.abstract} onChange={handleChange} required multiline rows={4} slotProps={{ htmlInput: { maxLength: 2000 } }} />
-              <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5, display: 'block' }}>
-                {formData.abstract.length}/2000
-              </Typography>
+            <TextField
+              fullWidth
+              size="small"
+              label="Article Abstract"
+              value={formData.abstract}
+              onChange={(e) => updateField('abstract', e.target.value)}
+              required
+              multiline
+              rows={5}
+              error={Boolean(errors.abstract)}
+              helperText={errors.abstract || `${abstractLength}/2000 characters`}
+              inputProps={{ maxLength: 2000 }}
+            />
+
+            <TextField
+              fullWidth
+              size="small"
+              label="Keywords (comma separated)"
+              value={formData.keywords}
+              onChange={(e) => updateField('keywords', e.target.value)}
+              required
+              error={Boolean(errors.keywords)}
+              helperText={errors.keywords || `Current keywords: ${keywordCount} / 10`}
+            />
+
+            <TextField
+              fullWidth
+              size="small"
+              label="Comment to Submission"
+              value={formData.comments}
+              onChange={(e) => updateField('comments', e.target.value)}
+              multiline
+              rows={3}
+              helperText=" "
+            />
+
+            <Box sx={fieldGrid}>
+              <Box>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1, fontWeight: 600 }}>
+                  Attach Article Manuscript* (Word, PDF)
+                </Typography>
+
+                <Button variant="outlined" component="label" size="small">
+                  Upload Article
+                  <input hidden type="file" accept=".pdf,.doc,.docx" onChange={(e) => setArticleFile(e.target.files ? e.target.files[0] : null)} />
+                </Button>
+
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  {articleFile ? articleFile.name : 'No file selected'}
+                </Typography>
+
+                {errors.article_file && (
+                  <Typography variant="caption" color="error">
+                    {errors.article_file}
+                  </Typography>
+                )}
+              </Box>
+
+              <Box>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1, fontWeight: 600 }}>
+                  Attach Cover Letter* (PDF)
+                </Typography>
+
+                <Button variant="outlined" component="label" size="small">
+                  Upload Article
+                  <input hidden type="file" accept=".pdf,.doc,.docx" onChange={(e) => setArticleFile(e.target.files ? e.target.files[0] : null)} />
+                </Button>
+
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  {coverLetterFile ? coverLetterFile.name : 'No file selected'}
+                </Typography>
+
+                {errors.cover_letter_file && (
+                  <Typography variant="caption" color="error">
+                    {errors.cover_letter_file}
+                  </Typography>
+                )}
+              </Box>
             </Box>
 
-            <TextField fullWidth label="Key words (Limited to 10 words, comma separated)" name="keywords" value={formData.keywords} onChange={handleChange} />
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1, fontWeight: 600 }}>
+                Supplementary Files (optional)
+              </Typography>
 
-            {/* File Upload Row */}
-            <Grid container spacing={3}>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 1, fontWeight: 600 }}>
-                    Attach Article* (Word, PDF)
-                  </Typography>
-                  <input
-                    type="file"
-                    accept=".pdf,.doc,.docx"
-                    onChange={(e) => setArticleFile(e.target.files ? e.target.files[0] : null)}
-                    required
-                    style={{ color: '#7b809a', maxWidth: '100%', fontSize: '0.8rem' }}
-                  />
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 1, fontWeight: 600 }}>
-                    Attach Cover Letter* (PDF)
-                  </Typography>
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={(e) => setCoverLetterFile(e.target.files ? e.target.files[0] : null)}
-                    required
-                    style={{ color: '#7b809a', maxWidth: '100%', fontSize: '0.8rem' }}
-                  />
-                </Box>
-              </Grid>
-            </Grid>
+              <Button variant="outlined" component="label" size="small">
+                Upload Article
+                <input hidden type="file" accept=".pdf,.doc,.docx" onChange={(e) => setArticleFile(e.target.files ? e.target.files[0] : null)} />
+              </Button>
 
-            <TextField fullWidth label="Comment to Submission" name="comments" value={formData.comments} onChange={handleChange} multiline rows={2} />
+              {supplementaryFiles.length > 0 && (
+                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1.5 }}>
+                  {supplementaryFiles.map((file, index) => (
+                    <Chip
+                      key={`${file.name}-${file.size}-${index}`}
+                      label={file.name}
+                      onDelete={() => removeSupplementaryFile(index)}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </Box>
           </Box>
 
           <Divider sx={{ my: 4 }} />
 
-          {/* ── Submit ── */}
-          <Box display="flex" justifyContent="center">
-            <Button disabled={isSubmitting} variant="contained" color="primary" size="large" type="submit" sx={{ px: 8, py: 1.5, fontSize: '1rem' }}>
-              {isSubmitting ? 'Submitting...' : 'Submit'}
-            </Button>
+          <Typography variant="h6" fontWeight={700} textAlign="center" sx={{ mb: 2 }}>
+            Consents
+          </Typography>
+
+          <Box sx={{ mb: 3 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={formData.consent_original}
+                  onChange={(e) => updateField('consent_original', e.target.checked)}
+                />
+              }
+              label="I confirm this article has not been published elsewhere."
+            />
+            {errors.consent_original && (
+              <Typography variant="caption" color="error" display="block" sx={{ ml: 4 }}>
+                {errors.consent_original}
+              </Typography>
+            )}
+
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={formData.consent_authors}
+                  onChange={(e) => updateField('consent_authors', e.target.checked)}
+                />
+              }
+              label="All co-authors have approved this submission."
+            />
+            {errors.consent_authors && (
+              <Typography variant="caption" color="error" display="block" sx={{ ml: 4 }}>
+                {errors.consent_authors}
+              </Typography>
+            )}
+
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={formData.consent_privacy}
+                  onChange={(e) => updateField('consent_privacy', e.target.checked)}
+                />
+              }
+              label="I agree to the journal's Privacy Policy and data-processing terms."
+            />
+            {errors.consent_privacy && (
+              <Typography variant="caption" color="error" display="block" sx={{ ml: 4 }}>
+                {errors.consent_privacy}
+              </Typography>
+            )}
           </Box>
 
+          <Divider sx={{ my: 4 }} />
+
+          <Box display="flex" justifyContent="space-between" gap={2} flexWrap="wrap">
+            <Button variant="outlined" onClick={handleSaveDraft} type="button">
+              Save as Draft
+            </Button>
+
+            <Box display="flex" gap={2}>
+              <Button variant="text" color="inherit" onClick={handleCancel} type="button">
+                Cancel
+              </Button>
+
+              <Button
+                disabled={isSubmitting}
+                variant="contained"
+                color="primary"
+                type="submit"
+              >
+                {isSubmitting ? 'Submitting...' : 'Submit'}
+              </Button>
+            </Box>
+          </Box>
         </Card>
       </form>
     </Box>

@@ -1,100 +1,119 @@
-import React, { useState, useEffect } from 'react';
-import { Autocomplete, TextField, CircularProgress } from '@mui/material';
+import { useEffect, useState } from 'react';
+import { Autocomplete, CircularProgress, TextField } from '@mui/material';
 
-interface CityAutocompleteProps {
+type CityAutocompleteProps = {
+  selectedCountry: string;
   value: string;
-  selectedCountry?: string;
   onChange: (val: string) => void;
   label?: string;
   required?: boolean;
-}
+  error?: boolean;
+  helperText?: string;
+};
 
-export default function CityAutocomplete({ value, selectedCountry, onChange, label = "City", required = false }: CityAutocompleteProps) {
-  const [open, setOpen] = useState(false);
+type CityApiItem = {
+  name?: string;
+  country?: string;
+  admin1?: string;
+};
+
+export default function CityAutocomplete({
+  selectedCountry,
+  value,
+  onChange,
+  label = 'City',
+  required = false,
+  error = false,
+  helperText = ' ',
+}: CityAutocompleteProps) {
   const [options, setOptions] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    let active = true;
+    const query = value.trim();
 
-    if (inputValue.length < 1) {
+    if (!selectedCountry.trim()) {
       setOptions([]);
-      return undefined;
+      setLoading(false);
+      return;
     }
 
+    if (query.length < 2) {
+      setOptions([]);
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
     setLoading(true);
 
-    // Connect to Open-Meteo Global Geocoding API
-    fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(inputValue)}&count=100&language=en&format=json`)
+    fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+        query
+      )}&count=100&language=en&format=json`,
+      { signal: controller.signal }
+    )
       .then((res) => res.json())
       .then((data) => {
-        console.log('INPUT:', inputValue);
-        console.log('SELECTED COUNTRY:', selectedCountry);
-        console.log('API RESULTS:', data.results);
-        if (active) {
-          if (data.results) {
-            let filteredResults = data.results;
-            if (selectedCountry) {
-              const selected = selectedCountry.toLowerCase().trim();
+        const results: CityApiItem[] = Array.isArray(data?.results) ? data.results : [];
 
-              filteredResults = filteredResults.filter((item: any) => {
-                console.log('CITY:', item.name, '| API COUNTRY:', item.country, '| SELECTED:', selectedCountry);
+        const filtered = results.filter(
+          (item) =>
+            (item.country || '').trim().toLowerCase() ===
+            selectedCountry.trim().toLowerCase()
+        );
 
-                const apiCountry = item.country?.toLowerCase().trim();
-                return apiCountry === selected;
-              });
-            }
-            console.log('FILTERED RESULTS:', filteredResults);
+        const names = filtered.map((item) =>
+          item.admin1 ? `${item.name}, ${item.admin1}` : item.name || ''
+        );
 
-            const names = filteredResults.map((item: any) => {
-              if (item.admin1) return `${item.name}, ${item.admin1}`;
-              return item.name;
-            });
-            const uniqueNames = Array.from(new Set<string>(names));
-            setOptions(uniqueNames);
-          } else {
-            setOptions([]);
-          }
-          setLoading(false);
+        setOptions([...new Set(names.filter(Boolean))].slice(0, 50));
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+          console.error('City fetch error:', err);
         }
       })
-      .catch(() => {
-        if (active) setLoading(false);
+      .finally(() => {
+        setLoading(false);
       });
 
-    return () => {
-      active = false;
-    };
-  }, [inputValue, value, selectedCountry]);
+    return () => controller.abort();
+  }, [value, selectedCountry]);
 
   return (
     <Autocomplete
-      open={open}
-      onOpen={() => setOpen(true)}
-      onClose={() => setOpen(false)}
-      inputValue={inputValue}
-      onInputChange={(_, newInputValue) => {
-        setInputValue(newInputValue);
-        onChange(newInputValue);
-      }}
-      value={value}
-      onChange={(_, newValue) => onChange(newValue || '')}
+      freeSolo
       options={options}
+      inputValue={value}
+      onInputChange={(_, newInputValue) => onChange(newInputValue)}
+      onChange={(_, newValue) => onChange(typeof newValue === 'string' ? newValue : '')}
       loading={loading}
+      disabled={!selectedCountry}
+      noOptionsText={
+        !selectedCountry
+          ? 'Select country first'
+          : value.trim().length < 2
+            ? 'Type at least 2 letters'
+            : 'No cities found'
+      }
       renderInput={(params) => (
         <TextField
           {...params}
+          fullWidth
+          size="small"
           label={label}
           required={required}
-          size="small"
+          error={error}
+          helperText={helperText}
+          placeholder={selectedCountry ? 'Start typing city...' : 'Select country first'}
           InputProps={{
             ...params.InputProps,
             endAdornment: (
-              <React.Fragment>
-                {loading ? <CircularProgress color="inherit" size={20} /> : null}
+              <>
+                {loading ? <CircularProgress color="inherit" size={18} /> : null}
                 {params.InputProps.endAdornment}
-              </React.Fragment>
+              </>
             ),
           }}
         />
